@@ -3,4 +3,4 @@ uvicorn==0.21.0
 sqlalchemy==2.0.4
 pydantic==2.0
 python-multipart==0.0.5
-jwt==3.3.0
+PyJWT==2.6.0  # Asegúrate de poner la última versión compatible.

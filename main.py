@@ -148,3 +148,94 @@ async def create_portfolio(
 
     return {"message": "Portafolio creado exitosamente", "portfolio_id": new_portfolio.id}
 
+import logging
+
+# Configuración de logs
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+
+# ...
+
+# Ruta para registrar un usuario
+@app.post("/register", response_model=UserResponse)
+def register(user_data: UserCreate, db: Session = Depends(get_db)):
+    logging.info("Intentando registrar un nuevo usuario")
+    existing_user = db.query(User).filter(User.email == user_data.email).first()
+    if existing_user:
+        logging.warning("El usuario ya existe")
+        raise HTTPException(status_code=400, detail="El usuario ya existe")
+
+    hashed_password = pwd_context.hash(user_data.password)
+    new_user = User(full_name=user_data.full_name, email=user_data.email, hashed_password=hashed_password)
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    logging.info("Usuario registrado exitosamente")
+    return new_user
+
+# Ruta para login y generación de token
+@app.post("/login", response_model=TokenResponse)
+def login(login_data: LoginRequest, db: Session = Depends(get_db)):
+    logging.info("Intentando iniciar sesión")
+    user = db.query(User).filter(User.email == login_data.email).first()
+    if not user or not verify_password(login_data.password, user.hashed_password):
+        logging.warning("Credenciales incorrectas")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales incorrectas")
+
+    token = create_jwt_token(user.id)
+    logging.info("Sesión iniciada exitosamente")
+    return {"access_token": token, "token_type": "bearer"}
+
+# Ruta para crear un portafolio (aceptando datos y archivos en multipart/form-data)
+@app.post("/create_portfolio/")
+async def create_portfolio(
+    description: str = Form(...),
+    languages: str = Form(...),
+    cv: UploadFile = File(...),  # CV como archivo
+    projects: List[UploadFile] = File(...),  # Proyectos como lista de imágenes
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    logging.info("Intentando crear un nuevo portafolio")
+    # Guardamos el CV en un directorio, y almacenamos la ruta
+    cv_directory = "static/cvs"
+    os.makedirs(cv_directory, exist_ok=True)
+    cv_path = os.path.join(cv_directory, cv.filename)
+    with open(cv_path, "wb") as f:
+        f.write(await cv.read())
+
+    # Crear el portafolio
+    new_portfolio = Portfolio(
+        user_id=current_user.id,
+        description=description,
+        languages=languages,
+        cv=cv_path  # Guardamos la ruta del archivo
+    )
+    db.add(new_portfolio)
+    db.commit()
+    db.refresh(new_portfolio)
+
+    logging.info("Portafolio creado exitosamente")
+    # Guardar imágenes de los proyectos
+    project_directory = "static/projects"
+    os.makedirs(project_directory, exist_ok=True)
+
+    for project_image in projects:
+        project_image_path = os.path.join(project_directory, project_image.filename)
+        with open(project_image_path, "wb") as f:
+            f.write(await project_image.read())
+
+        # Crear el proyecto asociado con la imagen
+        new_project = Project(
+            portfolio_id=new_portfolio.id,
+            name=project_image.filename,  # Asignamos el nombre de la imagen como nombre del proyecto
+            image=project_image_path  # Ruta de la imagen
+        )
+        db.add(new_project)
+        db.commit()
+
+    logging.info("Proyectos creados exitosamente")
+    return {"message": "Portafolio creado exitosamente", "portfolio_id": new_portfolio.id}
