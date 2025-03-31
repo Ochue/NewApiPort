@@ -29,34 +29,35 @@ class SocialMediaCreate(BaseModel):
 class PortfolioCreate(BaseModel):
     full_name: str
     description: str
-    languages: str
-    projects: List[ProjectCreate]
-    socials: List[dict]
+    languages: List[str]  # Ahora manejamos múltiples lenguajes como lista
+    projects: List[ProjectCreate]  # Lista de proyectos
+    socials: List[SocialMediaCreate]  # Redes sociales (nombres y URLs)
     cv: str  # Campo para recibir el CV en Base64
+    type_technologies: str  # Tecnologías utilizadas, como Web, Mobile, etc.
 
 # Para la respuesta del portafolio
 class ProjectOut(BaseModel):
     name: str
     description: str
     language: str
-    image: str
+    image: str  # Imagen del proyecto
 
 class SocialMediaOut(BaseModel):
     name: str
     url: str
 
-class PortfolioOut(BaseModel):  # Esto es lo que te faltaba definir
+class PortfolioOut(BaseModel):
     id: int
     full_name: str
     description: str
-    languages: str
+    languages: str  # Esto sigue siendo un campo de texto
     cv: str
+    type_technologies: str
     projects: List[ProjectOut]
-    socials: List[SocialMediaOut]
+    socials: List[SocialMediaOut]  # Redes sociales
 
     class Config:
-        orm_mode = True
-
+        orm_mode = True  # Habilita el modo ORM para serializar correctamente
 
 # Para la solicitud de login
 class LoginRequest(BaseModel):

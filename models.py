@@ -18,10 +18,12 @@ class Portfolio(Base):
     description = Column(String)
     languages = Column(String)
     cv = Column(String)
+    type_technologies = Column(String)  # <-- Este campo está agregado
+    image_url = Column(String)
 
     owner = relationship("User", back_populates="portfolios")
-    projects = relationship("Project", back_populates="portfolio")
-    socials = relationship("SocialMedia", back_populates="portfolio")
+    projects = relationship("Project", back_populates="portfolio")  # <-- Relación con proyectos
+    social_networks = relationship("SocialNetwork", back_populates="portfolio")
 
 class Project(Base):
     __tablename__ = "projects"
@@ -32,13 +34,14 @@ class Project(Base):
     language = Column(String)
     image = Column(String)
 
-    portfolio = relationship("Portfolio", back_populates="projects")
+    portfolio = relationship("Portfolio", back_populates="projects")  # <-- Relación con portfolio
 
-class SocialMedia(Base):
-    __tablename__ = "social_media"
+class SocialNetwork(Base):
+    __tablename__ = 'social_networks'
+
     id = Column(Integer, primary_key=True, index=True)
-    portfolio_id = Column(Integer, ForeignKey("portfolios.id"))
-    name = Column(String)
-    url = Column(String)
+    name = Column(String, index=True)
+    url = Column(String, index=True)
+    portfolio_id = Column(Integer, ForeignKey('portfolios.id'))
 
-    portfolio = relationship("Portfolio", back_populates="socials")
+    portfolio = relationship("Portfolio", back_populates="social_networks")

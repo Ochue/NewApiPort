@@ -1,14 +1,13 @@
 from fastapi import FastAPI, Depends, HTTPException, status, File, Form, UploadFile
 from sqlalchemy.orm import Session
 from database import SessionLocal, engine
-from models import User, Portfolio, Project
+from models import User, Portfolio, Project, SocialNetwork
 from passlib.context import CryptContext
 from pydantic import BaseModel
 import jwt
 from datetime import datetime, timedelta
-from typing import List
-from io import BytesIO
 import os
+import logging
 
 # Crear la base de datos
 from database import Base
@@ -21,6 +20,12 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 SECRET_KEY = "mi_secreto"
 ALGORITHM = "HS256"
 
+# Configuración de logs
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+
 # Dependencia para obtener la sesión de la base de datos
 def get_db():
     db = SessionLocal()
@@ -28,28 +33,6 @@ def get_db():
         yield db
     finally:
         db.close()
-
-# Modelo Pydantic para login
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-# Modelo Pydantic para token de respuesta
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str
-
-# Modelo Pydantic para registro de usuario
-class UserCreate(BaseModel):
-    full_name: str
-    email: str
-    password: str
-
-# Modelo Pydantic para respuesta de usuario
-class UserResponse(BaseModel):
-    id: int
-    full_name: str
-    email: str
 
 # Función para generar un token JWT
 def create_jwt_token(user_id: int):
@@ -75,106 +58,69 @@ def get_current_user(token: str, db: Session = Depends(get_db)):
     except jwt.PyJWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
 
-# Ruta para registrar un usuario
-@app.post("/register", response_model=UserResponse)
-def register(user_data: UserCreate, db: Session = Depends(get_db)):
-    existing_user = db.query(User).filter(User.email == user_data.email).first()
-    if existing_user:
-        raise HTTPException(status_code=400, detail="El usuario ya existe")
+# Modelos Pydantic
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
-    hashed_password = pwd_context.hash(user_data.password)
-    new_user = User(full_name=user_data.full_name, email=user_data.email, hashed_password=hashed_password)
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
 
-    return new_user
+class UserCreate(BaseModel):
+    full_name: str
+    email: str
+    password: str
 
-# Ruta para login y generación de token
-@app.post("/login", response_model=TokenResponse)
-def login(login_data: LoginRequest, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.email == login_data.email).first()
-    if not user or not verify_password(login_data.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Credenciales incorrectas")
+class UserResponse(BaseModel):
+    id: int
+    full_name: str
+    email: str
 
-    token = create_jwt_token(user.id)
-    return {"access_token": token, "token_type": "bearer"}
+class PortfolioResponse(BaseModel):
+    id: int
+    description: str
+    languages: str
+    type_technologies: str
+    cv: str
+    image_url: str
+    social_networks: list
+    projects: list
 
-# Ruta para crear un portafolio (aceptando datos y archivos en multipart/form-data)
-@app.post("/create_portfolio/")
-async def create_portfolio(
-    description: str = Form(...),
-    languages: str = Form(...),
-    cv: UploadFile = File(...),  # CV como archivo
-    projects: List[UploadFile] = File(...),  # Proyectos como lista de imágenes
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    # Guardamos el CV en un directorio, y almacenamos la ruta
-    cv_directory = "static/cvs"
-    os.makedirs(cv_directory, exist_ok=True)
-    cv_path = os.path.join(cv_directory, cv.filename)
-    with open(cv_path, "wb") as f:
-        f.write(await cv.read())
+class SocialNetworkCreate(BaseModel):
+    name: str
+    url: str
 
-    # Crear el portafolio
-    new_portfolio = Portfolio(
-        user_id=current_user.id,
-        description=description,
-        languages=languages,
-        cv=cv_path  # Guardamos la ruta del archivo
-    )
-    db.add(new_portfolio)
-    db.commit()
-    db.refresh(new_portfolio)
-
-    # Guardar imágenes de los proyectos
-    project_directory = "static/projects"
-    os.makedirs(project_directory, exist_ok=True)
-
-    for project_image in projects:
-        project_image_path = os.path.join(project_directory, project_image.filename)
-        with open(project_image_path, "wb") as f:
-            f.write(await project_image.read())
-
-        # Crear el proyecto asociado con la imagen
-        new_project = Project(
-            portfolio_id=new_portfolio.id,
-            name=project_image.filename,  # Asignamos el nombre de la imagen como nombre del proyecto
-            image=project_image_path  # Ruta de la imagen
-        )
-        db.add(new_project)
-        db.commit()
-
-    return {"message": "Portafolio creado exitosamente", "portfolio_id": new_portfolio.id}
-
-import logging
-
-# Configuración de logs
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
-
-# ...
+class ProjectCreate(BaseModel):
+    name: str
+    description: str
+    language_used: str
+    image: UploadFile
 
 # Ruta para registrar un usuario
 @app.post("/register", response_model=UserResponse)
 def register(user_data: UserCreate, db: Session = Depends(get_db)):
     logging.info("Intentando registrar un nuevo usuario")
+    
     existing_user = db.query(User).filter(User.email == user_data.email).first()
     if existing_user:
         logging.warning("El usuario ya existe")
         raise HTTPException(status_code=400, detail="El usuario ya existe")
 
     hashed_password = pwd_context.hash(user_data.password)
-    new_user = User(full_name=user_data.full_name, email=user_data.email, hashed_password=hashed_password)
+    new_user = User(
+        full_name=user_data.full_name,
+        email=user_data.email,
+        hashed_password=hashed_password
+    )
+    
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
 
     logging.info("Usuario registrado exitosamente")
-    return new_user
+    
+    return UserResponse(id=new_user.id, full_name=new_user.full_name, email=new_user.email)
 
 # Ruta para login y generación de token
 @app.post("/login", response_model=TokenResponse)
@@ -189,53 +135,86 @@ def login(login_data: LoginRequest, db: Session = Depends(get_db)):
     logging.info("Sesión iniciada exitosamente")
     return {"access_token": token, "token_type": "bearer"}
 
-# Ruta para crear un portafolio (aceptando datos y archivos en multipart/form-data)
+# Ruta para crear un portafolio
 @app.post("/create_portfolio/")
 async def create_portfolio(
-    description: str = Form(...),
-    languages: str = Form(...),
-    cv: UploadFile = File(...),  # CV como archivo
-    projects: List[UploadFile] = File(...),  # Proyectos como lista de imágenes
+    description: str = Form(...),  # Descripción del portafolio
+    languages: str = Form(...),  # Lenguajes
+    type_technologies: str = Form(...),  # Tecnologías
+    social_networks: str = Form(...),  # Redes sociales como texto
+    cv: UploadFile = File(...),  # Subir archivo CV
+    image: UploadFile = File(...),  # Subir imagen
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     logging.info("Intentando crear un nuevo portafolio")
-    # Guardamos el CV en un directorio, y almacenamos la ruta
+
+    # Guardamos el CV en un directorio y almacenamos la ruta
     cv_directory = "static/cvs"
     os.makedirs(cv_directory, exist_ok=True)
     cv_path = os.path.join(cv_directory, cv.filename)
     with open(cv_path, "wb") as f:
         f.write(await cv.read())
 
-    # Crear el portafolio
+    # Guardamos la imagen del proyecto
+    project_directory = "static/projects"
+    os.makedirs(project_directory, exist_ok=True)
+    image_path = os.path.join(project_directory, image.filename)
+    with open(image_path, "wb") as f:
+        f.write(await image.read())
+
+    # Crear el portafolio con la información proporcionada
     new_portfolio = Portfolio(
         user_id=current_user.id,
         description=description,
         languages=languages,
-        cv=cv_path  # Guardamos la ruta del archivo
+        type_technologies=type_technologies,
+        cv=cv_path,  # Guardamos la ruta del archivo CV
+        image_url=image_path  # Guardamos la ruta de la imagen
     )
+    
     db.add(new_portfolio)
     db.commit()
     db.refresh(new_portfolio)
 
-    logging.info("Portafolio creado exitosamente")
-    # Guardar imágenes de los proyectos
-    project_directory = "static/projects"
-    os.makedirs(project_directory, exist_ok=True)
-
-    for project_image in projects:
-        project_image_path = os.path.join(project_directory, project_image.filename)
-        with open(project_image_path, "wb") as f:
-            f.write(await project_image.read())
-
-        # Crear el proyecto asociado con la imagen
-        new_project = Project(
+    # Guardamos las redes sociales
+    social_network_list = social_networks.split(",")  # Asumiendo que las redes sociales se pasan como texto separado por comas
+    for sn in social_network_list:
+        name, url = sn.split(":")  # Asumimos que el formato es 'nombre:red_social'
+        social_network = SocialNetwork(
             portfolio_id=new_portfolio.id,
-            name=project_image.filename,  # Asignamos el nombre de la imagen como nombre del proyecto
-            image=project_image_path  # Ruta de la imagen
+            name=name.strip(),
+            url=url.strip()
         )
-        db.add(new_project)
-        db.commit()
+        db.add(social_network)
 
-    logging.info("Proyectos creados exitosamente")
+    db.commit()
+
+    logging.info("Portafolio creado exitosamente")
+
     return {"message": "Portafolio creado exitosamente", "portfolio_id": new_portfolio.id}
+
+# Ruta para obtener el portafolio
+@app.get("/portfolio", response_model=PortfolioResponse)
+def get_portfolio(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    logging.info(f"Obteniendo portafolio del usuario {current_user.id}")
+    
+    portfolio = db.query(Portfolio).filter(Portfolio.user_id == current_user.id).first()
+    
+    if not portfolio:
+        logging.warning("Portafolio no encontrado")
+        raise HTTPException(status_code=404, detail="Portafolio no encontrado")
+    
+    social_networks = db.query(SocialNetwork).filter(SocialNetwork.portfolio_id == portfolio.id).all()
+    projects = db.query(Project).filter(Project.portfolio_id == portfolio.id).all()
+
+    return PortfolioResponse(
+        id=portfolio.id,
+        description=portfolio.description,
+        languages=portfolio.languages,
+        type_technologies=portfolio.type_technologies,
+        cv=portfolio.cv,
+        image_url=portfolio.image_url,
+        social_networks=[{"name": sn.name, "url": sn.url} for sn in social_networks],
+        projects=[{"name": project.name, "description": project.description, "image_url": project.image} for project in projects]
+    )
